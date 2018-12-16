@@ -1,0 +1,484 @@
+---
+title: "ISYE 6501 Week 7 Homework"
+author: "Brad May"
+date: "February 28, 2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+####Question 10.1
+
+**Using the same crime data set as in Questions 8.2 and 9.1, find the best model you can using:**
+**(a) a regression tree model**
+**(b) a random forest model**
+
+**In R, you can use the tree package or the rpart package, and the randomForest package. For each model, describe one or two qualitative takeaways you get from analyzing the results (i.e., don't just stop when you have a good model, but interpret it too).**
+
+First, let's tackle the regression tree model.
+
+As usual, we will start by clearing the environment, loading the "tree" library that contains the "tree" function we will use, setting the seed, loading the crime dataset, and inspecting it to ensure that it loaded properly.
+
+```{r}
+# Question 10.1:  Crime data set using regression tree & random forest
+
+# Regression tree
+
+# Clear environment
+rm(list = ls())
+
+# Load the "tree" library and set seed
+library(tree)
+set.seed(1)
+
+# Load the dataset and inspect it
+data = read.table("uscrime.txt", header = TRUE, sep = "")
+head(data)
+```
+
+The data looks like it loaded properly.  So, we will now move on to running the "tree" function against the dataset and summarizing its results.
+
+```{r}
+# Set up our model using a regression tree ("tree" function) and summarize
+tree_model = tree(Crime ~ ., data = data)
+summary(tree_model)
+```
+
+From this, we see that seven terminal nodes or leaves were created using four predictors:  "Po1", "Pop", "LF", and "NW".  We now run some code to look at this tree in more detail.
+
+```{r}
+# Look at the tree in more detail
+tree_model$frame
+plot(tree_model)
+text(tree_model)
+```
+
+Next, we'll generate predictions from the tree created, plot those predictions against the actual responses, and calculate the R-squared value.
+
+```{r}
+# Make predictions and plot
+predictions = predict(tree_model)
+plot(data$Crime, predictions, xlab = "Crime", ylab = "Predicted Crime")
+
+# Evaluate the efficacy of the model
+sse = sum((predictions - data$Crime) ^ 2)
+sst = sum((data$Crime - mean(data$Crime)) ^ 2)
+1 - sse / sst
+```
+
+Although we do see our predictions trending in the correct direction with the actual responses, it is not a strong linear correlation.  However, we do have a reasonable R-squared value calculated of about 72.4%.  Next, let's perform a cross-validation on the model and see how it performs.
+
+```{r}
+# Perform cross-validation on the model
+cv_tree = cv.tree(tree_model)
+plot(cv_tree$size, cv_tree$dev, type = "b", xlab = "Number of Leaves", 
+     ylab = "Dev")
+cv_tree$dev
+sst
+# Deviation terms greater than sst so R-squared negative
+```
+
+We notice under cross-validation that our deviation terms are all greater (across all number of leaves) than the total sum of squares (sst).  This would mean that, were we to calculate R-squared, we would get a negative value.  Thus, something is going on with this model that needs to be rectified.  Let's start exploring this by pruning the tree back to just two leaves.
+
+```{r}
+# Prune the tree back
+leaf_number = 2
+pruned_tree = prune.tree(tree_model, best = leaf_number)
+plot(pruned_tree)
+text(pruned_tree)
+```
+
+Here, we see the two leaves are associated with the predictor "Po1" and break on either side of Po1 = 7.65.  Let's now use this model to make predictions and see what kind of R-squared value it yields us.  Then, we can cross-validate this new model and use that information to measure the new performance.
+
+```{r}
+# Make predictions and plot the pruned tree
+predictions = predict(pruned_tree)
+
+# Evaluate the efficacy of the model using the pruned tree
+sse = sum((predictions - data$Crime) ^ 2)
+sst = sum((data$Crime - mean(data$Crime)) ^ 2)
+1 - sse / sst
+
+# Cross-validation of the pruned tree model
+cv_tree = cv.tree(pruned_tree)
+cv_tree$dev
+sst
+# Deviation greater than sst so R-squared still negative
+```
+
+Again, we see deviation values greater than "sst" which would calculate to a negative R-squared.  Plus, we see an R-squared value from the predictions (before cross-validation) of only about 36.3%, much worse than before.  What is going on?
+
+The problem is that the model is making its predictions by averaging across all leaves.  This is an inefficient way to do things.  Instead, we should create a separate regression equation for each leaf, optimize each equation, cross-validate, and see if, by doing this, we can improve our overall performance of the model.  Let's do that now with the two leaves.
+
+```{r}
+# Calculate separate regression equation for each leaf
+# Break data up by the two leaves
+data1 = data[which(pruned_tree$where == 2), ]
+data2 = data[which(pruned_tree$where == 3), ]
+
+# Run regression on each of these.  Use cross-validation to determine R-squared
+tree_model2a = lm(Crime ~ M + So + Ed + Po1 + Po2 + LF + M.F + Pop + NW + 
+                          U1 + U2 + Wealth + Ineq + Prob + Time, data = data1)
+summary(tree_model2a)
+```
+
+We split the data into two sets based on the values of "Po1" in each datapoint.  We then ran our standard regression model using the "lm" function.  The summary results are displayed.  This yields an adjusted R-squared of about 62.1% but many coefficients are not signficicant according to their p-values.  So, we will run through a process of eliminating them one by one according to the worst p-value in each run until we arrive at a model with the best performance.  That final model is displayed below along with its summary results.
+
+```{r}
+# Optimize the regression coefficients using p-values
+tree_model2a1 = lm(Crime ~ So + Ed + Pop + 
+                           Prob + Time, data = data1)
+summary(tree_model2a1)
+```
+
+This yields an adjusted R-squared of about 70.1% using five predictors:  "So", "Ed", "Pop", "Prob", and "Time".  Next, we will do a similar analysis on the other leaf.  The final regression equation and summary is shown below.
+
+```{r}
+# Run regression on the other leaf
+tree_model2b = lm(Crime ~ M + So + Ed + Po1 + Po2 + LF + M.F + Pop + NW + 
+                          U1 + U2 + Wealth + Ineq + Prob + Time, data = data2)
+summary(tree_model2b)
+# Optimize equation of second leaf using p-values
+tree_model2b1 = lm(Crime ~ Ed + Po1 + Pop + 
+                           U2 + Wealth + Ineq + Time, data = data2)
+summary(tree_model2b1)
+```
+
+Now, we get an adjusted R-squared value of about 76.3% using seven predictors:  "Ed", "Po1", "Pop", "U2", "Wealth", "Ineq", and "Time".
+
+Let's now cross-validate the two models we have just created.  We'll start with the first leaf.  We have to load the "DAAG" library so as to access the "cv.lm" function.
+
+```{r results="hide"}
+# Cross-validation of the model for each leaf
+# Load "DAAG" library to use the "cv.lm" function
+library(DAAG)
+# Cross-validate first leaf
+cv_tree2a1 = cv.lm(data1, tree_model2a1, m = 5)
+```
+
+And, we'll calculate the R-squared value of the first leaf equation.
+
+```{r}
+# Calculate R-squared for first leaf
+sse_cv_tree2a1 = attr(cv_tree2a1, "ms") * nrow(data)
+1 - sse_cv_tree2a1 / sst
+```
+
+This yields an R-squared of 84.9% which is very high.  Now, let's do the same thing for the second leaf.
+
+```{r results="hide"}
+# Cross-validate second leaf
+cv_tree2b1 = cv.lm(data2, tree_model2b1, m = 5)
+```
+
+```{r}
+# Calculate R-squared for second leaf
+sse_cv_tree2b1 = attr(cv_tree2b1, "ms") * nrow(data)
+1 - sse_cv_tree2b1 / sst
+```
+
+This yields an R-squared of about 48.5%.  Not as good as the first leaf but not too terribly bad.
+
+I did take a look at running this with three leaves.  I got decent R-squared values for two of the three branches.  One was about 85% and the other was over 90%.  However, the third leaf's equation only yielded an R-squared of about 27%.  That low value, combined with the possibility of overfitting on one maybe two of the other leaves led me to stay with the equation for the two-leaf scenario.
+
+So, we have one equation for when Po < 7.65 that involves the predictors "So", Ed", "Pop", "Prob", and "Time".  And, we have a second equation for when Po > 7.65 that involves the predictors "Ed", "Po1", "Pop", "U2", "Wealth", "Ineq", and "Time".
+
+With regards to qualitative takeaways, I had two.  First, it was interesting to note how much overfitting was going on with the original model.  We got an R-squared value of a little over 70%.  Yet, when we cross-validated, we kept getting R-squared values that would calculate to negative.  That drove us to break the leaves out separately and generate individual equations for each.  My second observation was that, with such a small dataset (47 observations), we could not afford to break things down to too many leaves.  We used two initially and saw some overfitting on one of the leaves (R-squared of 76% went to 48% under cross-validation).  Going to three leaves, we found one leaf where cross-validation drove the R-squared value to below 30%.  So, you need to keep the limitations of a small dataset in mind when figuring out how best to set up your regression tree.
+
+**(b) a random forest model**
+
+Now, let's tackle the random forest model.
+
+As usual, let's start by clearing the environment, loading the "randomForest" library that contains the function we will use, setting the seed, and loading & inspecting the dataset (again, the "uscrime" dataset).
+
+```{r}
+# Random forest
+
+# Clear environment
+rm(list = ls())
+
+# Load the "random forest" library and set seed
+library(randomForest)
+set.seed(1)
+
+# Load the dataset and inspect it
+data = read.table("uscrime.txt", header = TRUE, sep = "")
+head(data)
+```
+
+Now, let's run the "random forest" function on the data.  We'll sample five variables at each split and try 1000 trees.  The results are shown below.
+
+```{r}
+# Run the random forest function on the data
+predictors = 5
+rf_model = randomForest(Crime ~ ., data = data, mtry = predictors, ntree = 1000, 
+                        importance = TRUE)
+rf_model
+```
+
+This model accounts for a tad over 41% of the variability in the data.  Now, let's do cross-validation and see how it affects our overall model performance.
+
+```{r}
+# Leave one out cross-validation
+sst = sum((data$Crime - mean(data$Crime)) ^ 2)
+sse_cv = 0
+for (i in 1:nrow(data)) {
+        temp_rf_model = randomForest(Crime ~ ., data = data[-i, ], 
+                                     mtry = predictors)
+        sse_cv = sse_cv + (predict(temp_rf_model, data[i, ]) - data[i, 16]) ^ 2
+}
+1- sse_cv / sst
+```
+
+We got an R-squared value of about 43% under cross-validation.  This was very close if not a little bit better than the R-squred value obtained initially.
+
+Here are two qualitative takeaways from the random forest model.  First, we did not get R-squared values as good as what we saw on some of the leaves of the regression tree.  But, the R-squared values did not change much at all during cross-validation.  Thus, no to little risk of overfitting using the random forest methodology.  Second, the regression tree model provided a better ability to see into the inner workings of the model itself.  Not so with the random forest.  With random forest, about all we could do was set up and run the model and view the results.  We could see the robustness of the results under cross-validation.  But, we could not tell what predictors or trees made up of predictors were driving those results.
+
+
+####Question 10.2
+
+**Describe a situation or problem from your job, everyday life, current events, etc., for which a logistic regression model would be appropriate. List some (up to 5) predictors that you might use.**
+
+I have been a big fan of college football for as many years as I can remember.  One thing that's fun to do during college football season is to make predictions on who will win the big games of the upcoming weekend.  As you move throughout the season, there is always new information being added as you observe how the different teams performed in past games against different types of opponents and different game situations.  But, in addition to just predicting winners and losers, it would also be helpful to know how good of a chance your winning or losing prediction has to be correct.  A logistic regression would be perfect for this.  You would classify as winners or losers based on some threshold.  But, you would know the percent likelihood that winning or losing classification would have.  Is it very near the threshold or well into winner or loser territory away from the threshold?  That would provide you lots of information about how optimistic to be in your predictions.  Some predictors I might use for this would be as follows:
+
+1. Point spread or betting line on the game (I think this would provide a lot of collective wisdom from a crowd of "experts").
+2. Number of wins teams have had in recent history against "quality" opponents.  We would need to define how long recent history is and what constitutes a "quality" opponent to do this.
+3. Each team's turnover margin over some time period.
+4. Each team's total offensive yards gained over some time period.
+5. Each team's total defensive yards given up over some time period.
+
+
+####Question 10.3
+
+**1. Using the GermanCredit data set germancredit.txt from** **http://archive.ics.uci.edu/ml/machine-learning-databases/statlog/german /** **(description at http://archive.ics.uci.edu/ml/datasets/Statlog+%28German+Credit+Data%29 ), use logistic regression to find a good predictive model for whether** **credit applicants are good credit risks or not. Show your model (factors used** **and their coefficients), the software output, and the quality of fit. You can** **use the glm function in R. To get a logistic regression (logit) model on data** **where the response is either zero or one, use family=binomial(link="logit") in your glm function call.**
+
+As usual, let's begin by clearing the environment, setting the seed, and loading & inspecting the data.
+
+```{r}
+# German credit data using logistic regression
+
+# Clear environment and set seed
+rm(list = ls())
+set.seed(1)
+
+# Load the dataset and inspect it
+data = read.table("germancredit.txt", header = FALSE, sep = "")
+head(data)
+```
+
+Everything looks good regarding the data load.  We do notice, upon inspection, that there are a few numerical variables but many more categorical variables.  The categories are codes such as A11, A12, A33, etc.  These codes correspond to different things and you have to download the dataset explanation online to figure out what those things are.  The bottom line is that, at some point, we are going to have to modify these categorical variables in order to perform our logistic regression.  More about that later.  For now, though, let's deal with the response variable which is V21.  That is currently coded as 1 & 2.  We need to change that to 0 & 1 so that we can run the "glm" function on it using the binary family.  The following code accomplishes that.
+
+```{r}
+# Convert response variable from 1 & 2 to 0 & 1
+data$V21[data$V21 == 1] = 0
+data$V21[data$V21 == 2] = 1
+head(data)
+```
+
+Upon inspection, we now notice that column V21 has been converted to values of either one or zero.  Zero means a good customer and one means a bad customer.  Next, let's set up our training and validation datasets.  We'll randomly select 70% of the data for the training set and the remaining 30% for the validation set.
+
+```{r}
+# Establish training & validation datasets from original data
+rows = nrow(data)
+data_sample = sample(1:rows, size = round(rows * 0.7), replace = FALSE)
+train_data = data[data_sample, ]
+valid_data = data[-data_sample, ]
+```
+
+Now, let's run the logistic regression model using "glm" and summarize the results.
+
+```{r}
+# Run logistic regression model and summarize results
+model_logit = glm(V21 ~ V1 + V2 + V3 + V4 + V5 + V6 + V7 + V8 + V9 + V10 + V11 + 
+                        V12 + V13 + V14 + V15 + V16 + V17 + V18 + V19 + V20, 
+                        family = binomial(link = "logit"), data = train_data)
+summary(model_logit)
+```
+
+We see from the summary that, for all categorical variables, an estimate is given for each of the different categories that fall under that variable.  Several of these items have high p-values and could potentially be discarded.  So long as at least one category has a sufficiently low p-value, then we will accept that variable.  We can then eliminate any variables that do not have a sufficient p-value across all their categories.  For the purposes of this exercise, I chose p < 0.05.  I ran through several model iterations until I obtained a result having all p-values < 0.05.  That final result is displayed below.
+
+```{r}
+# Optimize by removing all variables with p-value > 0.05
+model_logit1 = glm(V21 ~ V1 + V2 + V3 + V4 + V6 + V8 + V9 + V10 + 
+                        V12 + V14 + V15, 
+                        family = binomial(link = "logit"), data = train_data)
+summary(model_logit1)
+```
+
+Of course, we still see some variable/category combinations with a high p-value.  However, at least one category under that variable does have a sufficient p-value in each case.  Next, we are going to add columns for each of the categories for each variable that still appear in the model and have a sufficient p-value.  Under each new column, we will assign a one if that category exists in that datapoint and a zero if it does not.  We will do this for both the training and validation datasets.  Training first...
+
+```{r}
+# Add columns for all significant categorical variables & assign binary values
+# Training data
+train_data$V1A13[train_data$V1 == "A13"] = 1
+train_data$V1A13[train_data$V1 != "A13"] = 0
+train_data$V1A14[train_data$V1 == "A14"] = 1
+train_data$V1A14[train_data$V1 != "A14"] = 0
+train_data$V3A32[train_data$V3 == "A32"] = 1
+train_data$V3A32[train_data$V3 != "A32"] = 0
+train_data$V3A33[train_data$V3 == "A33"] = 1
+train_data$V3A33[train_data$V3 != "A33"] = 0
+train_data$V3A34[train_data$V3 == "A34"] = 1
+train_data$V3A34[train_data$V3 != "A34"] = 0
+train_data$V4A41[train_data$V4 == "A41"] = 1
+train_data$V4A41[train_data$V4 != "A41"] = 0
+train_data$V4A410[train_data$V4 == "A410"] = 1
+train_data$V4A410[train_data$V4 != "A410"] = 0
+train_data$V4A42[train_data$V4 == "A42"] = 1
+train_data$V4A42[train_data$V4 != "A42"] = 0
+train_data$V4A43[train_data$V4 == "A43"] = 1
+train_data$V4A43[train_data$V4 != "A43"] = 0
+train_data$V4A49[train_data$V4 == "A49"] = 1
+train_data$V4A49[train_data$V4 != "A49"] = 0
+train_data$V6A65[train_data$V6 == "A65"] = 1
+train_data$V6A65[train_data$V6 != "A65"] = 0
+train_data$V9A93[train_data$V9 == "A93"] = 1
+train_data$V9A93[train_data$V9 != "A93"] = 0
+train_data$V10A103[train_data$V10 == "A103"] = 1
+train_data$V10A103[train_data$V10 != "A103"] = 0
+train_data$V12A122[train_data$V12 == "A122"] = 1
+train_data$V12A122[train_data$V12 != "A122"] = 0
+train_data$V12A124[train_data$V12 == "A124"] = 1
+train_data$V12A124[train_data$V12 != "A124"] = 0
+train_data$V14A143[train_data$V14 == "A143"] = 1
+train_data$V14A143[train_data$V14 != "A143"] = 0
+train_data$V15A152[train_data$V15 == "A152"] = 1
+train_data$V15A152[train_data$V15 != "A152"] = 0
+train_data$V15A153[train_data$V15 == "A153"] = 1
+train_data$V15A153[train_data$V15 != "A153"] = 0
+head(train_data)
+```
+
+And then Validation...
+
+```{r}
+# Validation data
+valid_data$V1A13[valid_data$V1 == "A13"] = 1
+valid_data$V1A13[valid_data$V1 != "A13"] = 0
+valid_data$V1A14[valid_data$V1 == "A14"] = 1
+valid_data$V1A14[valid_data$V1 != "A14"] = 0
+valid_data$V3A32[valid_data$V3 == "A32"] = 1
+valid_data$V3A32[valid_data$V3 != "A32"] = 0
+valid_data$V3A33[valid_data$V3 == "A33"] = 1
+valid_data$V3A33[valid_data$V3 != "A33"] = 0
+valid_data$V3A34[valid_data$V3 == "A34"] = 1
+valid_data$V3A34[valid_data$V3 != "A34"] = 0
+valid_data$V4A41[valid_data$V4 == "A41"] = 1
+valid_data$V4A41[valid_data$V4 != "A41"] = 0
+valid_data$V4A410[valid_data$V4 == "A410"] = 1
+valid_data$V4A410[valid_data$V4 != "A410"] = 0
+valid_data$V4A42[valid_data$V4 == "A42"] = 1
+valid_data$V4A42[valid_data$V4 != "A42"] = 0
+valid_data$V4A43[valid_data$V4 == "A43"] = 1
+valid_data$V4A43[valid_data$V4 != "A43"] = 0
+valid_data$V4A49[valid_data$V4 == "A49"] = 1
+valid_data$V4A49[valid_data$V4 != "A49"] = 0
+valid_data$V6A65[valid_data$V6 == "A65"] = 1
+valid_data$V6A65[valid_data$V6 != "A65"] = 0
+valid_data$V9A93[valid_data$V9 == "A93"] = 1
+valid_data$V9A93[valid_data$V9 != "A93"] = 0
+valid_data$V10A103[valid_data$V10 == "A103"] = 1
+valid_data$V10A103[valid_data$V10 != "A103"] = 0
+valid_data$V12A122[valid_data$V12 == "A122"] = 1
+valid_data$V12A122[valid_data$V12 != "A122"] = 0
+valid_data$V12A124[valid_data$V12 == "A124"] = 1
+valid_data$V12A124[valid_data$V12 != "A124"] = 0
+valid_data$V14A143[valid_data$V14 == "A143"] = 1
+valid_data$V14A143[valid_data$V14 != "A143"] = 0
+valid_data$V15A152[valid_data$V15 == "A152"] = 1
+valid_data$V15A152[valid_data$V15 != "A152"] = 0
+valid_data$V15A153[valid_data$V15 == "A153"] = 1
+valid_data$V15A153[valid_data$V15 != "A153"] = 0
+head(valid_data)
+```
+
+We will now train a new model using these newly created binary variables.
+
+```{r}
+# Train new model using newly created variables
+model_logit_new = glm(V21 ~ V1A13 + V1A14 + V3A32 + V3A33 + V3A34 + V4A41 + 
+                              V4A410 + V4A42 + V4A43 + V4A49 + V6A65 + V9A93 + 
+                              V10A103 + V12A122 + V12A124 + V14A143 + V15A152 + 
+                              V15A153, family = binomial(link = "logit"), 
+                              data = train_data)
+summary(model_logit_new)
+```
+
+And, now optimize this new model by removing variables that do not have a sufficient p-value.  The final model is shown below.
+
+```{r}
+# Optimize model by removing variables with p-value > 0.10
+model_logit_new1 = glm(V21 ~ V1A13 + V1A14 + V3A34 + V4A41 + 
+                              V4A410 + V4A42 + V4A43 + V6A65 + V9A93 + 
+                              V10A103 + V12A124 + V14A143 + V15A152 + 
+                              V15A153, family = binomial(link = "logit"), 
+                                data = train_data)
+summary(model_logit_new1)
+```
+
+For the purposes of this exercise, I used those variables with p-values < 0.10.  Now, let's use the validation set to make predictions from the model and generate a confusion matrix using those predictions and the original dataset repsonses.
+
+```{r}
+# Make predictions using the validation set and build a confusion matrix
+pred = predict(model_logit_new1, valid_data, type = "response")
+bin_pred = as.integer(pred > 0.5)
+cm = table(bin_pred, valid_data$V21)
+cm
+(cm[1, 1] + cm[2, 2]) / sum(cm)
+cm[1, 1] / sum(cm[, 1])
+cm[2, 2] / sum(cm[, 2])
+```
+
+The confusion matrix shows that, on average, the model has a 70% chance of predicting accurately overall.  However, in breaking that down, we see that the model is about 86% likely to correctly predict someone who is a good credit risk.  But, the model is only about 36% likely to accurately predict someone who would be a bad credit risk.  About 64% of the time, someone who is actually a bad credit risk would get recommended as a customer by the prediction.  Of course, we are using 0.5 as our threshold.  We could go to a lower threshold and thus more accurately predict the bad credit risk people.  However, the price we pay for doing that would be to incorrectly predict more of the good credit risk people and thus forego them as potential customers.  We can see that in the following graph.
+
+```{r}
+# AUC
+# Load the "pROC" library
+library(pROC)
+# Conduct analysis
+ROC = roc(valid_data$V21, pred)
+plot(ROC)
+```
+
+Right now, our Sensitivity or ability to accurately predict the good credit risk people is very high (86%).  That corresponds to a Specificity or ability to accurately predict the bad credit risk people of about 36%.  Were we to raise our Specificity to something higher, then our Sensitivity declines.  It's a balancing act between the ability to correctly predict good credit risk and bad credit risk people.  So, how do we determine where to place the threshold?  More about that in the next question.
+
+**2. Because the model gives a result between 0 and 1, it requires setting a threshold probability to separate between "good" and "bad" answers. In this data set, they estimate that incorrectly identifying a bad customer as good, is 5 times worse than incorrectly classifying a good customer as bad. Determine a good threshold probability based on your model.**
+
+We are given the fact that the cost of predicting a bad customer is good is five times the cost of predicting that a good customer is bad.  So, we will calculate the cost by varying the threshold and generating the confusion matrix for each threshold value.  Then, we'll calculate the cost at each threshold value by multiplying the number of predicted good customers who are actually bad by five and adding to that the number of predicted bad customers who are actually good.
+
+```{r}
+# Different thresholds to determine minimum cost
+l = c()
+for (i in 1:8) {
+        bin_pred = as.integer(pred > (i/10))
+        cm = table(bin_pred, valid_data$V21)
+        cost = cm[1, 2] * 5 + cm[2, 1]
+        l[i] = cost
+        # Calculate cost and store in l vector.  Find minimum cost.
+}
+l
+```
+
+I only went up to 80% on my threshold range.  The reason for that is, once we hit a 90% threshold, we are predicting every customer is good.  This would cause my calculation to break down since we no longer have the second row in the confusion matrix.  I could have adjusted for this by using an if/then statement.  But, no need.  We can easily see that the cost for 90% and 100% thresholds will be higher than any costs at a lower threshold.
+
+So, the minimum cost occurs at a threshold of 10%.  But, notice that this is the low end of the threshold range we chose.  By choosing an extremely low threshold, we are certainly minimizing the number of bad customers accidentally chosen.  However, we are doing this at the expense of foregoing many good customers.  That is not good business.  What makes more sense, I think, would be to measure the cost per customer actually selected based on the prediction.  Let's calculate that for each threshold value and find the minimum.  That's the threshold we should choose.  Here is how it looks
+
+```{r}
+# Different thresholds to determine minimum cost per customer selected
+l = c()
+for (i in 1:8) {
+        bin_pred = as.integer(pred > (i/10))
+        cm = table(bin_pred, valid_data$V21)
+        cost = cm[1, 2] * 5 + cm[2, 1]
+        cust_gain = sum(cm[1, ])
+        l[i] = cost / cust_gain
+        # Calculate cost and store in l vector.  Find minimum cost.
+}
+l
+min(l)
+which(l == min(l)) / 10
+```
+
+Again, I only went up to 80% on my threshold range.  But, that's ok.  The cost per customer selected will be higher at the 90% and 100% thresholds than at lower thresholds.
+
+We see that the threshold at which the minimum cost per customer selected is attained turns out to be 30%.  That is the threshold that should be chosen.
