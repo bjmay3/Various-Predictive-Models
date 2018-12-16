@@ -1,0 +1,255 @@
+---
+title: "ISYE 6501 Homework Week 10"
+author: "Brad May"
+date: "March 27, 2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+####Question 14.1
+
+**The breast cancer data set breast-cancer-wisconsin.data.txt from http://archive.ics.uci.edu/ml/machine-learning-databases/breast-cancer-wisconsin/ (description at http://archive.ics.uci.edu/ml/datasets/Breast+Cancer+Wisconsin+%28Original%29 ) has missing values.**
+
+**1. Use the mean/mode imputation method to impute values for the missing data.**
+
+As usual, let's start by clearing the environment and setting the seed.  Then, we'll load the data table.  Let's also add column headers to the dataset.  They are listed in the description at the web link given in the question.  Finally, we'll inspect the first few rows of the dataset to ensure that everything looks in order.
+
+```{r}
+# Question 14.1:  Breast Cancer Dataset
+
+# Missing values in variables
+
+# Clear environment and set the seed
+rm(list = ls())
+set.seed(1)
+
+# Load the dataset, add headers to it, and inspect it
+data = read.table("breast-cancer-wisconsin.data.txt", header = FALSE, sep = ",")
+headers = c('ID', 'Thickness', 'Cell_Size', 'Cell_Shape', 'Adhesion', 
+            'Epith_Cell_Size', 'Bare_Nuclei', 'Chromatin', 'Normal_Nuclei', 
+            'Mitoses', 'Class')
+colnames(data) = headers
+head(data)
+```
+
+Everything looks like it loaded properly.  So, let's next explore the dataset to determine where any missing values might be located.  We'll start by summarizing the data.
+
+```{r}
+# Summarize the dataset to pinpoint any missing values
+summary(data)
+# "Bare Nuclei" column may have some issues
+```
+
+From this, we see that something odd is going on with the "Bare_Nuclei" column.  That is the only column that has (Other) listed in addition to the typical Min, Max, Mean, Median, and Quartiles.  So, next, we'll inspect the "Bare_Nuclei" column in more detail.
+
+```{r}
+# Inspect "Bare Nuclei column"
+data$Bare_Nuclei
+sum(data['Bare_Nuclei'] == '?')
+# It looks like missing values are always denoted by "?"
+```
+
+From inspection, we see that, in addition to various numbers listed, several question marks, "?", appear.  There are 16 of them total and they seem to be the character of choice for denoting missing values.  Next, we'll replace all the "?" with "NA".  This will help us perform our data imputation later.
+
+```{r}
+# Replace all "?" with "NA" and check
+data[data == '?'] = NA
+sum(is.na(data['Bare_Nuclei']))
+# It looks like all 16 "?" were replaced with "NA"
+```
+
+It looks like all 16 "?" got replaced with "NA".  The next thing we need to address is that the "numbers" that show up in the "Bare_Nuclei" column are not recognized by R as being numerical.  R recognizes them as factors.  So, we'll have to convert the factors in the "Bare_Nuclei" column to numbers.  Then, we can calculate the mean and the mode of the "Bare_Nuclei" column.
+
+```{r}
+# Convert non-NA values into numbers
+data$Bare_Nuclei = as.numeric(as.character(data$Bare_Nuclei))
+# Mean/Mode method of imputation
+# Calculate mean of the numeric values in the "Bare_Nuclei" column
+mean = round(mean(data$Bare_Nuclei, na.rm = TRUE), 0)
+mean
+mode = 1
+mode
+# Mean is 4.  Mode is 1 obtained from previous summary results.
+```
+
+The mean is calculated to be 4.  The mode is 1.  We can actually see this by reviewing the summary results from before.  1 is the most frequently occurring value in the "Bare_Nuclei" column.  That makes it the mode.
+
+The last step we'll take in this section is to replace all the "NA" values by the mean.  We do that in the next snippet of code and we also create a new dataframe called "data_mean" in which to store the final results having the missing values replaced by the column mean.
+
+```{r}
+# Impute mean value into NA values
+data_mean = data # Copy the original dataset
+data_mean[is.na(data_mean)] = mean # Replace "NA" with mode
+# Check to ensure that no "NA" exist
+sum(is.na(data_mean['Bare_Nuclei']))
+# No "NA" in the "data_mode dataset
+```
+
+**2. Use regression to impute values for the missing data.**
+
+Now, let's try to replace the missing values via regression.  We'll start by creating a dataframe with all "NA" values removed.
+
+```{r}
+# Solve for missing values by regression
+# Create a dataframe with "NA" rows removed
+data_regress = na.omit(data)
+nrow(data_regress)
+# 683 rows remain indicating the 16 rows with "NA" were likely removed
+```
+
+Next, we'll run a linear regression model trying to solve for the "Bare_Nuclei" values relative to the other variables.  We did leave "ID" out of the analysis.  We also leave "Class" out of the analysis since it is the responses variable.
+
+```{r}
+model = lm(Bare_Nuclei ~ Thickness + Cell_Size + Cell_Shape + 
+                Adhesion + Epith_Cell_Size + Chromatin + 
+                Normal_Nuclei + Mitoses, data = data_regress)
+summary(model)
+# "Thickness", "Cell_Shape", "Adhesion", & "Chromatin" appear to be the only
+# significant coefficients so leave them in and re-run the regression
+```
+
+We see from this that the variables "Thickness", "Cell_Shape", "Adhesion", and "Chromatin" appear to be the only significant coefficients so we leave them in the analysis and run the linear regression model again.
+
+```{r}
+model1 = lm(Bare_Nuclei ~ Thickness + Cell_Shape + Adhesion + 
+                    Chromatin, data = data_regress)
+summary(model1)
+# All coefficients now appear to be significant
+```
+
+All the coefficients now appear to be significant so this is the model with which we will go.  The next steps we will take is to pull out all the rows from the dataset containing "NA" in order to get a prediction subset.  We will run the regression model on this to make predictions as to what the missing values might be.  Then, we will check to ensure that all predictions fall within the range of 1 to 10 which is the allowed range of the "Bare_Nuclei" variable.  Lastly, we'll put those predicted missing values back into the dataset within a new dataframe entitled "data_regress1".
+
+```{r}
+# Pull the "NA" rows out of the dataset for regression model application
+predict_data = data[rowSums(is.na(data)) > 0, -7]
+
+# Use "prediction" function to estimate missing values with regression model
+miss_val_est = round(predict(model1, newdata = predict_data), 0)
+min(miss_val_est)
+max(miss_val_est)
+# 1 and 8 are min and max values for prediction which is within the allowed
+# range of 1 to 10.
+
+# Replace "NA" values in data with regression estimates
+data_regress1 = data # Copy original data to another dataframe
+# Determine rows from original data with "NA" values
+miss_val_rows = which(is.na(data$Bare_Nuclei), arr.ind=TRUE)
+# Run through loop to replace all of the "NA" values
+index = 1 # This will act as index for "miss_val_est" array
+for (i in miss_val_rows) {
+        data_regress1[i, 7] = miss_val_est[index]
+        index = index + 1
+}
+# Check to ensure that no "NA" exist
+sum(is.na(data_regress1['Bare_Nuclei']))
+# No "NA" in the "data_regress1" dataset
+```
+
+**3. Use regression with perturbation to impute values for the missing data.**
+
+For the perturbation piece of this, we will create a perturbation array.  We do this by applying the "rnorm" function which draws several random numbers from the normal distribution using the missing values estimated by the regression and the standard deviation of that array of missing value predictions.  The perturbation array will have the same length as the "miss_val_est" array.
+
+```{r}
+# Use perturbation to calculate missing value estimates
+
+# Create perturbation array which is made up of random normal samples pulled
+# "miss_val_est" array using that array's standard deviation and length
+perturb_array = rnorm(length(miss_val_est), miss_val_est, sd(miss_val_est))
+min(perturb_array)
+max(perturb_array)
+# Some values are less than one so we will need to adjust for these
+```
+
+We do notice that the perturbation array has values less than one.  Thus, we must adjust for that.  We do that in the following code where we round the perturbed estimates to an integer value and set a floor of one on all the array values.
+
+```{r}
+# Adjust for values less than one
+new_miss_val_est = vector(mode = 'integer', length = length((perturb_array)))
+for (i in 1:length(perturb_array)) {
+        # Round result and cap it at a floor of 1 and ceiling of 10
+        new_miss_val_est[i] = max(1, round(perturb_array[i], 0))
+}
+min(new_miss_val_est)
+max(new_miss_val_est)
+```
+
+All the estimated values now fall within the acceptable range.  The last step we will take will be to take the newly created missing value estimates using regression and perturbation and replace them in the original dataset.
+
+```{r}
+# Replace "NA" values in data with perturbed regression estimates
+data_perturb = data # Copy original data to another dataframe
+# Determine rows from original data with "NA" values
+miss_val_rows = which(is.na(data$Bare_Nuclei), arr.ind=TRUE)
+# Run through loop to replace all of the "NA" values
+index = 1 # This will act as index for "miss_val_est" array
+for (i in miss_val_rows) {
+        data_perturb[i, 7] = new_miss_val_est[index]
+        index = index + 1
+}
+# Check to ensure that no "NA" exist
+sum(is.na(data_perturb['Bare_Nuclei']))
+# No "NA" in the "data_perturb" dataset
+```
+
+We now have the following datasets where missing values have been replaced:
+
+1. data_mode -> all missing data replaced using the mode of "Bare_Nuclei" column
+2. data_regress1 -> missing values replaced via regression
+3. data_perturb -> missing values replaced via regression with perturbation
+
+**4. (Optional) Compare the results and quality of classification models (e.g., SVM, KNN) build using**
+**(1) the data sets from questions 1,2,3;**
+**(2) the data that remains after data points with missing values are removed; and**
+**(3) the data set when a binary variable is introduced to indicate missing values.**
+
+I did not have time to perform this optional section.  I will leave it for future work to do as I get more time.
+
+####Question 15.1
+
+**Describe a situation or problem from your job, everyday life, current events, etc., for which optimization would be appropriate. What data would you need?**
+
+There was a problem that came up on a recent project in my work where we were trying to determine the correct mix of mechanics to use in automobile repair shop.  An optimization model would be perfect to help solve such a problem.  Here are the data that we would need to build the model.
+
+1. Variables - the number of each skill level of mechanic to have on the final auto repair team.
+
+2. Constraints
+        a. Limitations on the types of repair jobs that each skill level of
+                mechanic could undertake and which would be beyond their
+                capabilities.
+        b. Limitations on the amount of hours each mechanic could work.
+        c. Limitations on the number and types of repair jobs that could be
+                going on concurrently.
+
+3. Objective - minimize the cost per job on average
+
+Additional information needed to be able to provide inputs to the above would be as follows:
+
+1. Different types of repair jobs that could be done.
+2. Average time each job takes to perform.
+3. Different skill levels of mechanics.
+4. Cost per hour for each skill level of mechanic.
+5. Number of repair bays available and types of repairs that can be conducted at each bay.
+
+
+####Question 15.2
+
+**In the videos, we saw the "diet problem". (The diet problem is one of the first large-scale optimization problems to be studied in practice. Back in the 1930's and 40's, the Army wanted to meet the nutritional requirements of its soldiers while minimizing the cost). In this homework you get to solve a diet problem with real data. The data is given in the file diet.xls.**
+
+**1. Formulate an optimization model (a linear program) to find the cheapest diet that satisfies the maximum and minimum daily nutrition constraints, and solve it using PuLP. Turn in your code and the solution. (The optimal solution should be a diet of air-popped popcorn, poached eggs, oranges, raw iceberg lettuce, raw celery, and frozen broccoli. UGH!)**
+
+
+
+**2. Please add to your model the following constraints (which might require adding more variables) and solve the new model:**
+
+**a. If a food is selected, then a minimum of 1/10 serving must be chosen. (Hint: now you will need two variables for each food i: whether it is chosen, and how much is part of the diet. You'll also need to write a constraint to link them.)**
+
+
+
+**b. Many people dislike celery and frozen broccoli. So at most one, but not both, can be selected.**
+
+
+
+**c. To get day-to-day variety in protein, at least 3 kinds of meat/poultry/fish/eggs must be selected. [If something is ambiguous (e.g., should bean-and-bacon soup be considered meat?), just call it whatever you think is appropriate - I want you to learn how to write this type of constraint, but I don't really care whether we agree on how to classify foods!]**
+
+
