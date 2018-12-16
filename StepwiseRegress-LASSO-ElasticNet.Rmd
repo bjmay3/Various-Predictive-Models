@@ -1,0 +1,267 @@
+---
+title: "ISYE 6501 Week 8 Homework"
+author: "Brad May"
+date: "March 7, 2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+####Question 11.1
+
+**Using the crime data set from Questions 8.2, 9.1, and 10.1, build a regression model using:**
+
+**1. Stepwise regression**
+**2. Lasso**
+**3. Elastic net**
+
+**For Parts 2 and 3, remember to scale the data first - otherwise, the regression coefficients will be on different scales and the constraint won't have the desired effect.**
+
+**For Parts 2 and 3, use the glmnet function in R.**
+
+**1. Stepwise regression**
+
+As usual, let's begin by clearing the environment.  Then, we'll load both the "stats" and "caret" libraries that contain some functions we'll be using later.  Lastly, we'll set the seed, load the dataset, and inspect it.
+
+```{r}
+# Question 11.1:  Crime data set using various variable selection methods
+
+# Stepwise regression
+
+# Clear environment
+rm(list = ls())
+
+# Load the "caret" library and set seed
+library(stats)
+library(caret)
+set.seed(1)
+
+# Load the dataset and inspect it
+data = read.table("uscrime.txt", header = TRUE, sep = "")
+head(data)
+```
+
+Everything looks good with the loading of the dataset.  So now, we have to standardize the data.  This will be required when we get to the "lasso" and "elastic net" functions.  But, it will also help us perform our stepwise regression.  We start by inspecting the different variables to determine which is the response variable and which are categorical variables.  We will not need to standardize these.
+
+```{r}
+# Standardize the data
+
+# Inspect each variable to determine the response variable and all
+# categorical variables
+str(data)
+# "Crime" is the response variable and "So" is the only categorical variable
+```
+
+We see that "Crime" is the response variable and "So" is the only categorical variable, taking on values of one or zero.  We will standardize all but these.  We'll do it by creating a matrix of all the other variables standardized and then adding back in the "Crime" and "So" variables to the standardized matrix.  When done with this, we'll inspect the new standardized matrix to ensure that all got adjusted as planned.
+
+```{r}
+# Standardize all variables except for the response variable ("Crime")
+# and the categorical variable ("So")
+standard_data = as.data.frame(scale(data[, c(1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 
+                                           13, 14, 15)]))
+# Add back the response variable ("Crime") and the categorical variable ("So")
+# and add their column names in as well
+standard_data = cbind(data[, 2], standard_data, data[, 16])
+colnames(standard_data)[1] = "So"
+colnames(standard_data)[16] = "Crime"
+# Inspect the standardized data
+head(standard_data)
+```
+
+Everything looks good so far so let's continue.  The next step is to perform five-fold cross-validation on the standardized data using stepwise regression to arrive at the best set of predictive variables.  The code below is what I used.  I start by creating a "control" equation that establishes our using Repeated Cross-Validation with five folds that are repeated five times.  We then apply this control equation in our training function for cross-validation.  We are using stepwise regression with AIC as our criterion.  I show the code but not the output.  A summary of the final results comes later.
+
+```{r, echo=TRUE, results='hide'}
+# Perform five-fold cross-validation
+control = trainControl(method = "repeatedcv", number = 5, repeats = 5)
+sw_regress_model = train(Crime ~ ., data = standard_data, "lmStepAIC", 
+                         scope = list(lower = Crime ~ 1, upper = Crime ~ .), 
+                         direction = "backward", trControl = control)
+```
+
+Now, we summarize the results to display the variables determined to be the most predictive per the stepwise regression.  In other words, the stepwise regression calculated until it got a point where removing any one of the variables listed in the summary would actually make the AIC value worse.
+
+```{r}
+# Summarize the final results of the stepwise regression model
+summary(sw_regress_model)
+```
+
+Now, let's apply our "lm" function using just the variables identified by the stepwise regression.  A summary of results is also shown.
+
+```{r}
+# Set up the final model and evaluate results
+sw_regress_model_final = lm(Crime ~ M + Ed + Po1 + M.F + U1 + U2 + Ineq + Prob, 
+                            data = data)
+summary(sw_regress_model_final)
+```
+
+From this, we see that all p-values are around 0.10 or below.  The p-value for "M.F" is a little above 0.10 but I left it in.  That's because removing it, per the stepwise regression process, would have made the model's AIC worse.
+
+The adjusted R-squared value stands at 74.4% which is pretty good and not too far away from the 78.9% unadjusted R-squared value.  So, I think we have a pretty good model.
+
+Now, let's next run a "leave one out" cross-validation on our model to gain an estimate of what the R-squared value would actually be given a set of data different from the training set.
+
+```{r}
+# Leave one out cross-validation on the stepwise regression model
+sstot = sum((data$Crime - mean(data$Crime)) ^ 2)
+tot_sse_sw = 0
+for (i in 1:nrow(standard_data)) {
+        mod_step_i_sw = lm(Crime ~ M + Ed + Po1 + M.F + U1 + U2 + Ineq + Prob, 
+                        data = standard_data[-i, ])
+        pred_i_sw = predict(mod_step_i_sw, newdata = standard_data[i, ])
+        tot_sse_sw = tot_sse_sw + ((pred_i_sw - data[i, 16]) ^ 2)
+}
+R2_mod_sw = 1 - tot_sse_sw / sstot
+R2_mod_sw
+```
+
+This gives an R-squared value of about 66.8% which is still pretty good.  We will keep this in mind as we move forward and try to obtain regression equations using both the Lasso and Elastic Net methods.
+
+**2. Lasso**
+
+We will start by loading the "glmnet" library which contains the functions we will use for both Lasso and Elastic Net.  We will also set the seed.  The data are already loaded.
+
+```{r}
+# LASSO
+
+# Load library "glmnet" which contains the "glmnet" function and set the seed
+library(glmnet)
+set.seed(1)
+```
+
+Next, we'll run our Lasso model using "glmnet".  We will actually run a cross-validation with "cv.glmnet".  In doing this, we need to break out our x and y terms separately from within the data and matricize them.  Also, note that we set our "alpha" value to one which establishes our model as Lasso.  Since "alpha" corresponds to "lambda", setting it to one eliminates the quadratic term from the t-budget leaving only the linear term.  This corresponds to the Lasso model.  We also use five folds, mean squared error as our measure type, and the "gaussian" family.  We also display a plot of the results.
+
+```{r}
+# Run the "lasso" model and plot the results
+lasso = cv.glmnet(x = as.matrix(standard_data[, -16]), 
+                  y = as.matrix(standard_data$Crime), alpha = 1, nfolds = 5, 
+                  type.measure = "mse", family = "gaussian")
+plot(lasso)
+```
+
+From this plot, we see that our minimum lambda (alpha) occurs somewhere around 12 (the leftmost vertical dashed line).  The rightmost vertical dashed line around 5 represents one standard deviation away.  We can see the exact numbers for these by running the following code.
+
+```{r}
+# Find minimum lambda and lambda one SD away
+lasso$nzero[which(lasso$lambda == lasso$lambda.min)]
+lasso$nzero[which(lasso$lambda == lasso$lambda.1se)]
+```
+
+Here, we see the 12 and the 5 displayed.  We can now use the following code to find the variable coefficients at minimum lambda suggested by the model.
+
+```{r}
+# Find the coefficients at minimum lambda
+coef(lasso, s = lasso$lambda.min)
+```
+
+This yields all the variables except "Po2", "LF", and "Time".  All others are thought to have some predictive value per the Lasso model.  At least, the Lasso model was willing to spend some t-budget on them.  Let's now re-run our "lm" regression function using these variables and summarize as follows.
+
+```{r}
+# Set up the final Lasso model and evaluate results
+lasso_model_final = lm(Crime ~ So + M + Ed + Po1 + M.F + Pop + NW + U1 + U2 + 
+                               Wealth + Ineq + Prob, data = data)
+summary(lasso_model_final)
+```
+
+This is interesting.  Several of the variables thought to be predictive per the Lasso model actually have p-values that are quite high.  Our adjusted R-squared is 72.6% while our unadjusted R-squared is 79.7%.  These are very good and comparable to what we had before using stepwise regression.  However, given all the variables showing high p-values, I suspect this model will perform worse than the stepwise regression model did under cross-validation.
+
+So, let's use the Lasso regression equation just calculated and run it through "leave one out" cross-validation as we did before with stepwise regression.
+
+```{r}
+# Leave one out cross-validation for Lasso
+sstot = sum((data$Crime - mean(data$Crime)) ^ 2)
+tot_sse_lasso = 0
+for (i in 1:nrow(standard_data)) {
+        mod_lasso_i = lm(Crime ~ M + Ed + Po1 + M.F + Pop + NW + U1 + U2 + Wealth + 
+                                 Ineq + Prob, data = standard_data[-i, ])
+        pred_i_lasso = predict(mod_lasso_i, newdata = standard_data[i, ])
+        tot_sse_lasso = tot_sse_lasso + ((pred_i_lasso - data[i, 16]) ^ 2)
+}
+R2_mod_lasso = 1 - tot_sse_lasso / sstot
+R2_mod_lasso
+```
+
+Here, we get 61.5% as our estimate for R-squared.  This isn't quite as good as our estimate using stepwise linear regression (66.8%).  That is as expected.  Let's see if we can obtain better results by running an Elastic Net model.
+
+***3. Elastic net***
+
+In Elastic Net, we are able to use different values of "alpha" (lambda) to determine the best one to optimize the linear and quadratic terms of our t-budget.  In theory, this should yield the optimum balance between model bias and model variance.
+
+So, let's run through various values of alpha to find the best one.  We will run through values of alpha from 0 to 1 incrementing by 0.01.  Then, we will determine which value of alpha produces the highest R-squared value.
+
+```{r}
+# Elastic Net
+
+set.seed(1)
+
+# Run through various values of alpha to see which yields the best R-squared
+R2_elastic = c()
+for (i in 0:100) {
+        elastic = cv.glmnet(x = as.matrix(standard_data[, -16]), 
+                            y = as.matrix(standard_data$Crime), alpha = i/100, 
+                            nfolds = 5, type.measure = "mse", 
+                            family = "gaussian")
+        R2_elastic = cbind(R2_elastic, 
+                           elastic$glmnet.fit$dev.ratio[which(
+                        elastic$glmnet.fit$lambda == elastic$lambda.min)])
+}
+elastic$glmnet.fit$dev.ratio[which(
+        elastic$glmnet.fit$lambda == elastic$lambda.min)]
+alpha_best = (which.max(R2_elastic) - 1) / 100
+alpha_best
+```
+
+An alpha of 0.31 produces the highest R-squared value.  So, now let's re-run the "glmnet" function using that value for alpha.  We will also pull out the coefficients to see which variables are being selected by the model.
+
+```{r}
+# Re-run "glmnet" using alpha_best and get coefficients
+elastic_net = cv.glmnet(x = as.matrix(standard_data[, -16]), 
+                        y = as.matrix(standard_data$Crime), alpha = alpha_best, 
+                        nfolds = 5, type.measure = "mse", family = "gaussian")
+coef(elastic_net, s = elastic_net$lambda.min)
+```
+
+It looks like all the variables are selected except for "Pop" and "Time".  So, let's now run the "lm" function using those variables selected by the Elastic Net model and summarize the results.
+
+```{r}
+# Set up the final Elastic Net model and evaluate results
+elastnet_model_final = lm(Crime ~ So + M + Ed + Po1 + Po2 + LF + M.F + NW + U1 + 
+                                  U2 + Wealth + Ineq + Prob, data = data)
+summary(elastnet_model_final)
+```
+
+Again, as with Lasso, we see several variables having high p-values.  Furthermore, our unadjusted R-squared is 79.8% which is very comparable to that obtained via both stepwise regression and Lasso.  But, our adjusted R-squared is now 71.9%, pretty good but worse than what it was for both stepwise regression and Lasso.  Given all this, I would expect this model to perform even worse than Lasso when subjected to cross-validation.
+
+Let's now run our cross-validation using "leave one out" on the Elastic Net model and see if our hypothesis is correct.
+
+```{r}
+# Leave one out cross-validation for Elastic Net
+sstot = sum((data$Crime - mean(data$Crime)) ^ 2)
+tot_sse_enet = 0
+for (i in 1:nrow(standard_data)) {
+        mod_elastnet_i = lm(Crime ~ So + M + Ed + Po1 + Po2 + LF + M.F + NW + 
+                                    U1 + U2 + Wealth + Ineq + Prob, 
+                            data = standard_data[-i, ])
+        pred_i_enet = predict(mod_elastnet_i, newdata = standard_data[i, ])
+        tot_sse_enet = tot_sse_enet + ((pred_i_enet - data[i, 16]) ^ 2)
+}
+R2_enet = 1 - tot_sse_enet / sstot
+R2_enet
+```
+
+This gives an R-squared of 55.9%.  As expected, it is worse than both stepwise regression and Lasso.  Why is this?
+
+I think the answer lies in the fact that this "Crime" dataset has a proportion of observations to variables that is too low.  We would ideally like to see a lot more observations given the number of variables with which we are working.  So, Lasso, for example, does not have sufficient information to determine that some variables that are likely not very predictive should have no t-budget expended on them.  As a result, Lasso does expend some t-budget on them.  But, that is likely because of random effects in the training set more than real effects.  In other words, the Lasso model is overfitting the training data and that fact becomes clear when we cross-validate.
+
+Elastic Net follows right along in a similar vein.  It has a wide variety of alphas (lambdas) with which to choose and it finds an optimal one.  But, that choice is probably made as a result of overfitting.  Too much of the random effects in the data as opposed to the real effects are driving the choice of the best alpha value.  so, Elastic Net performs even worse than Lasso and that fact becomes clear during cross-validation as well.
+
+Stepwise regression, on the other hand, goes through the process of looking at different combinations of variables until it happens upon the best combination at which point the selection criterion (AIC) cannot be improved upon.  As it turns out, when dealing with low numbers of observations relative to the number of variables, the methodology employed by stepwise regression tends to produce better, more robust results than those produced by optimization techniques such as Lasso or Elastic Net.
+
+So, in summary, we have run regression models on the "Crimes" dataset using stepwise regression, Lasso, and Elastic Net techniques.  As a result, for each of our equations, we obtained the following estimates for R-squared:
+
+Stepwise Regression - 66.8%
+Lasso - 61.5%
+Elastic Net - 55.9%
+
+One other interesting thing we could do is compare these results to those obtained we used Principal Component Analysis (PCA) on this same "Crimes" dataset.  We did that back in the Week 6 homework.  I referenced that work and realized I had used six components and obtained an R-squared valued of 65.9%.  We could have increased the number of components used and obtained slightly better R-squared values but six seemed to be a good compromise between keeping the model as simple as possible and still achieving good, robust results.
+
+So, we have now used this "Crimes" dataset to generate regression equations via many different means.  It looks like doing that allows us to account for about 65% of the variability in the data via our modeling.  Furthermore, it looks like the models obtained via either stepwise regression or PCA yielded the most promising results.
