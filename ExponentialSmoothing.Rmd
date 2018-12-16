@@ -1,0 +1,194 @@
+---
+title: "ISYE 6501 Homework Week 4"
+author: "Brad May"
+date: "February 6, 2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+####Question 7.1
+
+***Describe a situation or problem from your job, everyday life, current events, etc., for which exponential smoothing would be appropriate. What data would you need? Would you expect the value of alpha (the first smoothing parameter) to be closer to 0 or 1, and why?***
+
+Several years ago, I worked for a large electric utility company.  One of the major responsibilities of my team was load forecasting.  In other words, estimating electrical power demand of the utility's customers over time.  Electrical power is unique in that you can't generate extra electricity when demand is low and store it for future use.  Instead, electrical capacity always needs to be available to meet anticipated demand.  If there are surges in demand, extra capacity needs to be brought online quickly in order to handle that surge.  Thus, anticipating both the timing and magnitude of surges is critical to being able to meet that sudden, extra demand quickly.  Furthermore, recognizing trends in demand over time helps inform the need to build additional generating capacity.
+
+Exponential smoothing is highly appropriate for a situation like this because there is both a trending and a seasonal aspect of electricity demand.  Using exponential smoothing, we should be able to measure the effects of both trends and seasonality.  Upward trending in demand would indicate the need to build additional power plants and add supply capacity.  Seasonality, on the other hand, indicates when more quick start power plants would be required to meet those expected surges in electric demand.
+
+Data needed to do this would be as follows:
+
+1. Electricity system demand by hour over several years.
+2. Corresponding temperature data over this same time period.
+3. Number of customers over time and the types of customers they are (e.g., residential, commercial, or industrial).
+
+I would expect the value of alpha (the first smoothing parameter) to be closer to zero than to one.  This indicates more randomness in the system.  As a result, our forecasted value gets more of its information from the prior period's value than the observed value.  I say that alpha is closer to zero in my scenario because I think a lot of the variations in electricity demand are driven by weather.  Specifically, the temperature at any given point in time.  This is highly random.  Furthermore, the demand in any given period would be related to the demand in the prior period.  Thus, I could see the electricity demand, by and large, being rather random like the weather.  So, alpha closer to zero.
+
+
+####Question 7.2
+
+***Using the 20 years of daily high temperature data for Atlanta (July through October) from Question 6.2, build and use an exponential smoothing model to help make a judgment of whether the unofficial end of summer has gotten later over the 20 years. (Part of the point of this assignment is for you to think about how you might use exponential smoothing to answer this question. Feel free to combine it with other models if you'd like to. There's certainly more than one reasonable approach.)***
+
+
+First things first.  Let's do the standard housekeeping upfront and clear our environment, load the "stats" library where the Holt-Winters function resides, set the seed, and load our dataset.  Some additional steps are also necessary.  We need to convert our matrix of data into a vector and then convert that vector into a time series.  We do this so we can effectively run the Holt-Winters algorithm on the dataset.
+
+```{r}
+# Exponential smoothing temperature problem
+
+# Clear environment
+rm(list = ls())
+
+# Load the "stats" library and set seed
+library(stats)
+set.seed(1)
+
+# Load the dataset and convert it into a vector
+data = read.table("temps.txt", header = TRUE, sep = "")
+data = as.vector(unlist(data[, 2:21]))
+
+# Create a time series from the vectorized data
+data_ts = ts(data, start = 1996, frequency = 123)
+```
+
+Now that we have the time series, we will run a series of Holt-Winters functions on it.  Where seasonality is a factor, we will use the multiplicative seasonal factors.  First, let's look at single exponential smoothing.
+
+```{r}
+# Run the Holt-Winters function on the time series data
+
+# Single exponential smoothing
+model1 = HoltWinters(data_ts, beta = FALSE, gamma = FALSE)
+head(model1$fitted)
+model1$alpha
+plot(model1$fitted, main = "Single Exponential Smoothing")
+```
+
+Here we see a graph of xhat (predicted) and level (actual) over time with an alpha of 0.84.  An alpha closer to one means not a lot of randomness in the system so the prediction takes most of its information from the actual value.  Next, we'll look at double exponential smoothing using trend.
+
+```{r}
+# Double exponential smoothing with trend
+model2 = HoltWinters(data_ts, gamma = FALSE)
+head(model2$fitted)
+plot(model2$fitted, main = "Double Exponential Smoothing (Trend)")
+```
+
+We now see the trend line added to the graph.  The increasing in the early years is probably related to a start-up effect.  The trend levels off at a value near zero and stays steady throughout most of the years.  Next, we'll do double exponential smoothing with seasonality.
+
+```{r}
+# Double exponential smoothing with seasonality
+model2 = HoltWinters(data_ts, beta = FALSE, seasonal = "multiplicative")
+head(model2$fitted)
+plot(model2$fitted, main = "Double Exponential Smoothing (Seasonality)")
+```
+
+Here we see the trend line replaced with a seasonality factor graph over time.  We do notice that the upward swings in the seasonality graph appear to be getting larger over time.  This would seem to indicate that temperatures are getting hotter over time causing a higher seasonal factor in order to capture that fact.  That may help us answer the question about whether or not summers are getting longer.  But, before we answer that, let's bring it all together and look at triple exponential smoothing incorporating both trend and seasonality.
+
+```{r}
+# Triple exponential smoothing
+model3 = HoltWinters(data_ts, seasonal = "multiplicative")
+head(model3$fitted)
+plot(model3$fitted, main = "Triple Exponential Smoothing")
+```
+
+Here we see a flat trend line just like we saw in the double exponential smoothing trend graph after the start-up effects had subsided.  We also notice the same effect with the seasonality graph as we saw with the seasonality double exponential smoothing.  The upward swings in seasonality are getting more pronounced with time.  Now, let's see if that equates to longer summers.  To do this, we will isolate the seasonal factors into their own time series and then use that data to answer the question about the trends in length of summer.
+
+```{r}
+# Collect the seasonal factors into another time series for further analysis
+seasonal = model3$fitted[, 4] # Use the triple exponential smoothing model
+```
+
+Now that we have collected all the seasonal factors, it's time to perform analysis on them.  We will use a CUSUM approach to do this.  The steps for the CUSUM are as follows:
+
+1. Set a threshold.  I started with a threshold of five standard deviations of the seasonal factor data for the July months only.  July is clearly summer so that's why I only used the July data to set my threshold.
+2. Choose a C value.  I started with C = 0.
+3. Run a loop through each year for which we have data.  In each year, calculate the average seasonal factor for July of that year and use it in the CUSUM equation.  Keep looping through the year's worth of data until the threshold is exceeded.  Capture the number of days into summer at which this occurs.
+4. After running CUSUM in all years and collecting the data for number of days into summer, print out the number of days of summer for each year and plot it.  Also, return the average number of days of summer across all years.
+5. Analyze the results to see if any conclusions can be drawn regarding whether or not summer has been lasting longer in recent years.
+6. Re-run using different threshold and C values as appropriate.
+
+The code for performing this analysis is given below along with the results.
+
+```{r}
+# Collect baseline data (July) from seasonal factors
+baseline = subset(seasonal, cycle(seasonal) <= 31)
+
+# Analyze the seasonal factors using CUSUM
+threshold = 5 * sd(baseline) # Set the threshold to some number of std deviations
+C = 0 # Set my C-value equal to zero
+# Initialize a matrix for storing results
+threshold_day = matrix(data = NA, nrow = 19, ncol = 2)
+colnames(threshold_day) = c("Year", "# of Days")
+# Loop through all years for which we have data
+for (year in seq(1, 19, 1)) {
+        day_count = (year - 1) * 123 + 1 # Starts at first row for that year
+        day_end = day_count + 30 # Establishes last July entry for that year
+        average = mean(seasonal[day_count:day_end]) # Calculate July average
+        cusum = average - seasonal[day_count] - C # First CUSUM value
+        # Conditional statement sets CUSUM to zero if first calc negative
+        if(cusum < 0) {
+                cusum = 0
+        }
+        # Loop continues to accumulate CUSUM so long as CUSUM < threshold
+        while(cusum <= threshold) {
+                day_count = day_count + 1 # Increments to caputure next value
+                # Calculate accumulated CUSUM setting to zero if negative
+                cusum = cusum + (average - seasonal[day_count] - C)
+                if(cusum < 0) {
+                        cusum = 0
+                }
+        }
+        # Calculates number of days of summer until threshold exceeded then stores
+        # that value in a vector for later analysis
+        threshold_day[year, 1] = year + 1996
+        threshold_day[year, 2] = day_count - (year - 1) * 123
+}
+# Print out and plot results
+threshold_day
+mean(threshold_day[, 2])
+plot(threshold_day, xlab = "Year", ylab = "# of days at summer end")
+```
+
+From the plot, it looks like perhaps summers are getting longer.  We see a steady increase across all the years of the data from 1997 to 2015.
+
+However, the average number of days of summer is about 12.  That would place the end of summer in mid-July.  That seems way too early.  So, I decided to try to adjust for this with my C-value.  I realized, though, that since my seasonal factors are fairly small with slight variation around one, I would have to adjust my C-value in very small increments of a percent or two at a time.  As I moved my C-value, I could also adjust my threshold to see what effect that might have.
+
+I ended up choosing a C-value of 0.065 and keeping my threshold at five standard deviations.  That yielded an average number of days of summer at around 79 which puts us in mid-September which is close to September 20, the first day of autumn.  I was happy with these results.
+
+```{r, echo=FALSE}
+# Analyze the seasonal factors using CUSUM
+threshold = 5 * sd(baseline) # Set the threshold to some number of std deviations
+C = 0.065 # Set my C-value equal to zero
+# Initialize a matrix for storing results
+threshold_day = matrix(data = NA, nrow = 19, ncol = 2)
+colnames(threshold_day) = c("Year", "# of Days")
+# Loop through all years for which we have data
+for (year in seq(1, 19, 1)) {
+        day_count = (year - 1) * 123 + 1 # Starts at first row for that year
+        day_end = day_count + 30 # Establishes last July entry for that year
+        average = mean(seasonal[day_count:day_end]) # Calculate July average
+        cusum = average - seasonal[day_count] - C # First CUSUM value
+        # Conditional statement sets CUSUM to zero if first calc negative
+        if(cusum < 0) {
+                cusum = 0
+        }
+        # Loop continues to accumulate CUSUM so long as CUSUM < threshold
+        while(cusum <= threshold) {
+                day_count = day_count + 1 # Increments to caputure next value
+                # Calculate accumulated CUSUM setting to zero if negative
+                cusum = cusum + (average - seasonal[day_count] - C)
+                if(cusum < 0) {
+                        cusum = 0
+                }
+        }
+        # Calculates number of days of summer until threshold exceeded then stores
+        # that value in a vector for later analysis
+        threshold_day[year, 1] = year + 1996
+        threshold_day[year, 2] = day_count - (year - 1) * 123
+}
+# Print out and plot results
+threshold_day
+mean(threshold_day[, 2])
+plot(threshold_day, xlab = "Year", ylab = "# of days at summer end")
+```
+
+Now, we see something very interesting.  The plot makes it look like the length of summer is very steady at just under 80 days.  There is also a significant drop-off in the last two years of data.  I am not sure what is causing this but it existed in several different choices of threshold and C-value that yielded an end of summer around mid-September.  Perhaps summer has actually been getting shorter in recent years?  Regardless, two data points does not provide a lot of conclusive information.  We would have to continute to analyze this trend over time and see if it persists.
+
+In the end, I came to the conclusion that summer is not getting longer.  Its length has stayed fairly consistent across several years' worth of temperature data.
