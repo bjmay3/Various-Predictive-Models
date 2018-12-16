@@ -1,0 +1,180 @@
+---
+title: "Homework 5"
+author: "Brad May"
+date: "February 14, 2018"
+output:
+  word_document: default
+  html_document: default
+---
+
+####Question 8.1
+
+**Describe a situation or problem from your job, everyday life, current events, etc., for which a linear regression model would be appropriate. List some (up to 5) predictors that you might use.**
+
+
+I actually used a regression model in a previous job I held as a project manager.  It was a major project performing turnkey installations of computer networks at various sites across the country.  In all, several dozen sites were completed over a period of about three and a half years.  When I took over as project manager, we were about one year into the overall project schedule.  Thus, I had about a year's worth of data from which to select predictors and generate my regression model.  I used the regression model to estimate monthly costs looking ahead about two to three months.  We could not predict very accurately beyond that because the actual schedule out that far would tend to deviate significantly from the planned schedule.  This made prediction difficult since the predictors would then change significantly with the revised schedule.  However, we could be fairly accurate going out a couple of months.  In fact, my accounting clerk and I used to play a game.  At the beginning of the month, I would submit my monthly estimate of costs in a sealed envelope.  She would hold onto it throughout the month.  Then, at the end of the month, after she had tallied up all the costs, we would compare them to my estimate.  I was usually within 10% of actual.  And, if my guess was much different from that, then I could usually explain why based on unplanned events that had occurred.
+
+The predictors that I used were as follows:
+
+1. Number of network drops required.
+2. Square footage of space and number of floors.
+3. Site classification (1, 2, or 3).  This was a self-selected classification that we would determine in design.  It basically defined the networking equipment required and how it would be interconnected architecturally.
+4. Distance of site from our home base.
+
+
+####Quesion 8.2
+
+**Using crime data from http://www.statsci.org/data/general/uscrime.txt (description at http://www.statsci.org/data/general/uscrime.html ), use regression (a useful R function is lm or glm) to predict the observed crime rate in a city with the following data:**
+
+**M = 14.0      So = 0          Ed = 10.0       Po1 = 12.0**
+**Po2 = 15.5      LF = 0.640      M.F = 94.0      Pop = 150**
+**NW = 1.1        U1 = 0.120      U2 = 3.6        Wealth = 3200**
+**Ineq = 20.1     Prob = 0.04     Time = 39.0**
+
+**Show your model (factors used and their coefficients), the software output, and the quality of fit. Note that because there are only 47 data points and 15 predictors, you'll probably notice some overfitting. We'll see ways of dealing with this sort of problem later in the course.**
+
+
+First, let's take care of the usual housekeeping stuff.  We will clear the environment, load the "stats" library that contains the regression function (lm) that we intend to use, set the seed, and load the dataset.
+
+```{r}
+# Linear regression with crime statistics problem
+
+# Clear environment
+rm(list = ls())
+
+# Load the "stats" library and set seed
+library(stats)
+set.seed(1)
+
+# Load the dataset and convert it into a vector
+data = read.table("uscrime.txt", header = TRUE, sep = "")
+head(data)
+```
+
+A cursory review of the data shows that we have 16 variables.  Of these, the last one, "Crime", represents the dependent variable for which we are trying to generate a predictive model.  The other 15 could be used as independent variables or predictors of the "Crime" variable.
+
+Before we get into generating our predictive equation, let's do some preliminary analysis on the data by generating scatterplots and a correlation matrix.
+
+```{r}
+# Perform some preliminary data analysis (Scatterplot & Correlation Matrix)
+pairs(Crime ~ ., data = data, main = "Simple Scatterplot Matrix")
+cor_matrix = round(cor(data), 2)
+cor_matrix
+```
+
+Some things to note from the scatterplots and correlation matrix are as follows.  First, we see a very strong positive correlation between the variables "Po1" and "Po2" of 0.99.  Second, we see a very strong negative correlation between the variables "Wealth" and "Ineq" of -0.88.  We do not want to see strong correlations, either positive or negative between predictors.  So, we would not expect to see both of these pairs together in the final predictive equation.  Lastly, we notice that the strongest correlation between the "Crime" variable and the predictors is with both "Po1" and "Po2".  Again, we would not expect to see both of these together in the final equation but would likely expect to see one or the other.
+
+The last thing we want to do before generating our predictive equation is to set up the dataset of variables given in the problem statment upon which we want to use our final equation.  So, next, I set up a dataframe that contains the values of the specific independent variables that will go into the predictive equation.
+
+```{r}
+# Load dataframe that contains the values for which we want to generate prediction
+pred_df = data.frame(M = 14.0, So = 0, Ed = 10.0, Po1 = 12.0, Po2 = 15.5, 
+                         LF = 0.640, M.F = 94.0, Pop = 150, NW = 1.1, U1 = 0.120, 
+                         U2 = 3.6, Wealth = 3200, Ineq = 20.1, Prob = 0.04, Time = 39.0)
+head(pred_df)
+```
+
+By printing out the dataframe, we can conduct an inspection of it and see that the values entered there match the values of the independent variables given in the problem statment.
+
+Now, let's run the model (lm) using all the independent variables initially.  We will print out the summary results of the model so that we can see its basic statistics and make some determination if we might want to do further refinement on it.  We will also print out plots of the residuals to determine whether or not they are normally distributed.  We will call this first model run "model1".
+
+```{r}
+# Run the linear regression model on the training data
+model1 = lm(formula = Crime ~ M + So + Ed + Po1 + Po2 + LF + M.F + Pop + NW + 
+                   U1 + U2 + Wealth + Ineq + Prob + Time, data = data)
+summary(model1)
+par(mfrow = c(2,2))
+plot(model1)
+```
+
+The residuals all look to be fairly normally distributed.  However, we notice two things from the summary statistics.  First, the adjusted R-squared value is about 70.8%.  This is not bad.  However, if we look at the p-values for each of the independent variables, we notice several of them with values higher than 0.10.  This is the threshold I chose to use to determine whether or not an independent variable's coefficient was significantly different than zero.  Right now, only six of the 15 independent variables have p-values less than 0.10.
+
+One other test we can run is to take our existing predictive equation and run it against the values given in the problem for which we want to calculate a prediction.  Let's do that now.
+
+```{r}
+# Use the test set results to make predictions and validate model
+y_pred = predict(model1, newdata = pred_df)
+y_pred
+```
+
+From this, we get a prediction of 155.4.  Comparing this to other values of the "Crime" variable given in the dataset, we notice that this is lower than any other value in the dataset.  That seems suspicious.  It's possible that some of those independent variables with a p-value greater than 0.10 might be skewing the results.  Let's correct for this by removing all the variables with p-values greater than 0.10 and re-running the model.  We will call this second run "model2".
+
+```{r}
+# Re=run the linear regression model on the training data using on variables
+# with p-values less than 0.1
+model2 = lm(formula = Crime ~ M + Ed + Po1 + U2 + Ineq + Prob, data = data)
+summary(model2)
+par(mfrow = c(2, 2))
+plot(model2)
+```
+
+Now, we get an adjusted R-squared of 73.1%, higher than the 70.8% we saw before.  We notice, also, that all the variables now have a p-value less than 0.10.  Furthermore, the plots of the residuals all appear to yield a normal distribution.  So, we think we might have a good model.  Let's run it on the variables given in the problem statment and see what prediction it provides.
+
+```{r}
+# Use the test set results to make predictions and validate model
+y_pred = predict(model2, newdata = pred_df)
+y_pred
+```
+
+This yields a prediction of 1304.2.  This seems much more reasonable given the results contained within the dataset.  By eliminating all those variables with a high p-value, we have completely reduced their influence on the overall prediction.  Thus, our prediction coefficients only exist for those variables for which we can demonstrate a low probability chance of their coefficients being zero.  As a result, we seem to get a better prediction.
+
+The last thing we will do is run a cross-validation function ("cv.lm") on all the models.  We first load the "DAAG" library which contains this function.  Then, we run cross-validation on "model1" and display results.  We use five folds.
+
+```{r}
+# Load the "DAAG" library containing the "cv.lm" function to be used for
+# regression cross-validation
+library(DAAG)
+
+# Perform cross-validation on "model1" and display results
+par(mfrow = c(1, 1))
+c_model1 = cv.lm(data, model1, m = 5)
+c_model1
+```
+
+Then, we run the cross-valdation on "model2" and display results.
+
+```{r}
+# Perform cross-validation on "model2" and display results
+par(mfrow = c(1, 1))
+c_model2 = cv.lm(data, model2, m = 5)
+c_model2
+```
+
+"model1" yields an overall mean-squared error of 85,885 while "model2" produces an overall mean-squared error of 52,931.  So, we seem to see some improvement in the overall error going from "model1" to "model2".  This agrees with the results we saw earlier where "model2" generated a better adjusted R-squared and had all predictors significantly different from zero.
+
+Now, let's calculate both unadjusted and adjusted R-squared values for all of the models and compare them.
+
+```{r}
+# Calculate total sum of squares from the dataset
+SStot = sum((data$Crime - mean(data$Crime))^2)
+
+# Calculate residual sum of squares for all models
+SSres_model1 = sum(model1$residuals^2)
+SSres_model2 = sum(model2$residuals^2)
+SSres_c_model1 = attr(c_model1, "ms") * nrow(data)
+SSres_c_model2 = attr(c_model2, "ms") * nrow(data)
+
+# Calculate unadjusted R-squared values for all models
+r2_model1 = 1 - SSres_model1 / SStot
+r2_model2 = 1 - SSres_model2 / SStot
+r2_cv_model1 = 1 - SSres_c_model1 / SStot
+r2_cv_model2 = 1 - SSres_c_model2 / SStot
+
+# Calculate adjusted R-squared values for all models
+adjr2_model1 = 1 - ((1-r2_model1) * (47 - 1) / (47 - 15 - 1))
+adjr2_model2 = 1 - ((1-r2_model2) * (47 - 1) / (47 - 6 - 1))
+adjr2_cv_model1 = 1 - ((1 - r2_cv_model1) * (47 - 1) / (47 - 15 - 1))
+adjr2_cv_model2 = 1 - ((1 - r2_cv_model2) * (47 - 1) / (47 - 6 - 1))
+
+# Print out results of all R-squared calculations
+r2_model1
+adjr2_cv_model1
+r2_model2
+adjr2_model2
+r2_cv_model1
+adjr2_cv_model1
+r2_cv_model2
+adjr2_cv_model2
+```
+
+Some things of note from this.  First, the unadjusted R-squared for "model1" appears to be the highest.  But, once you adjust for the number of variables used to obtain an adjusted R-squared, that value falls off siginficantly.  "model2" possesses the highest adjusted R-squared.  However, when we look at the adjusted R-squared for the cross-validation of "model2", we see a bit of a dropoff, from 73.1% to 58.4%  This is because with only 47 observations of six independent variables, the ratio of variable to observations is higher than we would usually like to see.  This leads to overfitting.  So, "model2" has highly fitted itself to the specific 47 observations.  Once we do cross-validation where we start breaking out the data into training, test, and validation sets, the overfitting becomes apparent.  We are not using those specific 47 observations anymore so the robustness of the model starts to decline.  Thus, we would expect a lower value for adjusted R-squared which we do, in fact, see.
